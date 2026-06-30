@@ -1,12 +1,10 @@
 # Trip Concierge Agent
-
 A hand-rolled ReAct-style agent that plans a 3-day trip to Porto under a given
 budget.  The agent decides its own tool-call order — there is no hardwired script.
 
 ---
 
 ## Scenario & Tools
-
 **Scenario:** Trip concierge  
 **Goal:** _"Plan a 3-day trip to Porto under €600 and give me the total."_
 
@@ -18,29 +16,7 @@ budget.  The agent decides its own tool-call order — there is no hardwired scr
 
 The three tools together mirror a real planner's workflow: _find transport → find accommodation → verify the maths_.
 
----
 
-## Project Structure
-
-```
-trip-agent/
-├── trip_agent.py          # Agent loop (ReAct, step-limited)
-├── tools/
-│   ├── __init__.py
-│   ├── search_flights.py  # Tool 1
-│   ├── search_hotels.py   # Tool 2
-│   └── calculate.py       # Tool 3
-├── data/
-│   ├── flights.json       # Mock flight data
-│   └── hotels.json        # Mock hotel data
-├── tests/
-│   └── test_tools.py      # 31 unit tests (all three tools)
-├── captured_run.txt       # Captured agent run (see below)
-├── requirements.txt
-└── README.md
-```
-
----
 
 ## Running the agent
 
