@@ -1,66 +1,165 @@
-![logo_ironhack_blue 7](https://user-images.githubusercontent.com/23629340/40541063-a07a0a8a-601a-11e8-91b5-2f13e4e6b441.png)
+# Trip Concierge Agent
 
-# Assessment | Ship a Multi-Tool Agent
+A hand-rolled ReAct-style agent that plans a 3-day trip to Porto under a given
+budget.  The agent decides its own tool-call order — there is no hardwired script.
 
-## Overview
+---
 
-This is your chance to put the second half of the unit together. You'll build a small but genuinely useful **agent** that uses **three tools** to accomplish a real, multi-step goal — deciding its own steps, the way an agent should — and returns a **structured result**. Then you'll show you understand the grown-up parts: one reliability safeguard and one safety mitigation.
+## Scenario & Tools
 
-No RAG is required here. This is about **agents and tool use**: an agent that reasons, calls tools, and acts.
+**Scenario:** Trip concierge  
+**Goal:** _"Plan a 3-day trip to Porto under €600 and give me the total."_
 
-## What You'll Build
-
-An agent (use **Google ADK**, or a hand-rolled loop if you prefer — your choice) that:
-
-- has **three tools** it can call,
-- is given a **multi-step goal** it can't satisfy with a single tool call,
-- **decides for itself** which tools to use and in what order,
-- returns a **structured final result** (e.g. a small JSON object or a clearly formatted report), and
-- is **bounded** (a step limit) and **guarded** (one safety mitigation you implement and explain).
-
-### Pick a scenario (or invent your own)
-
-Choose one that interests you — these are starting points, not requirements:
-
-- **Trip concierge** — tools: `search_flights`, `search_hotels`, `calculate`. Goal: "Plan a 3-day trip to Porto under €600 and give me the total." Output: a structured itinerary with a cost breakdown.
-- **Order assistant** — tools: `lookup_order`, `check_warranty`, `calculate`. Goal: "I want two more of my last order — total cost, and is it still under warranty?" Output: a structured summary.
-- **Study planner** — tools: `list_topics`, `estimate_effort`, `calculate`. Goal: "Build me a study plan for the exam with total hours." Output: a structured plan.
-
-Your tools can use small local data files (like the `orders.json` you've seen) or return mock data — the focus is the **agent's behaviour**, not a real backend.
-
-## Requirements
-
-Your submission must include:
-
-1. **A working agent** with three tools that solves the multi-step goal by its own tool choices (not a script you hardwired).
-2. **A structured output** — the final answer in a parseable, well-shaped form, not just free text.
-3. **A step limit** so the agent cannot loop forever, with a sensible cap.
-4. **One safety mitigation** that you implement and can justify — for example, treating tool results as untrusted data, validating a tool's arguments before acting, or requiring confirmation before a "destructive" tool runs.
-5. **A README** in your repo covering:
-   - which scenario and three tools you chose, and why,
-   - one **reliability** note (how your step limit / failure handling protects the run),
-   - one **safety** note (the mitigation you added and what attack it defends against),
-   - a captured run showing the agent's tool calls and structured result.
-
-## Submission
-
-Work on a branch, commit your code and README, open a Pull Request, and paste its link into the submission box.
-
-**Deadline:** Sunday 28 June 2026, 23:59 local time. Late submissions are scored at 70% maximum.
-
-## Grading Rubric (100 pts)
-
-| Area | What we look for | Points |
+| Tool | What it does | Why it's needed |
 |---|---|---|
-| **Agent works** | Three tools; the multi-step goal is solved by the agent's own tool choices | 30 |
-| **Structured output** | Final result is well-shaped and parseable, not free text | 15 |
-| **Reliability** | A working step limit; graceful handling when a tool fails or the goal can't be met | 20 |
-| **Safety** | A real mitigation, correctly implemented and clearly justified | 20 |
-| **README & run** | Clear tool choices, reliability + safety notes, and a captured run | 15 |
+| `search_flights` | Searches mock flight data for routes to OPO, filtered by origin and optional price cap | The agent needs real (mock) pricing to pick the cheapest flight |
+| `search_hotels` | Searches mock hotel data in Porto, filtered by nightly rate and star rating, and computes `total_eur` per stay | Hotels must be chosen within whatever budget remains after the flight |
+| `calculate` | Evaluates an arithmetic expression using a whitelist parser (no `eval`) | The agent must add up flight + hotel + daily expenses to verify the total fits the budget |
 
-## Quality Bar
+The three tools together mirror a real planner's workflow: _find transport → find accommodation → verify the maths_.
 
-- The agent **decides its own steps** — reviewers should see tool calls it chose, not a fixed script
-- The output is genuinely **structured** and could be consumed by another program
-- Both the **step limit** and the **safety mitigation** actually run, and you can explain what each protects against
-- No API key is committed to the repo
+---
+
+## Project Structure
+
+```
+trip-agent/
+├── trip_agent.py          # Agent loop (ReAct, step-limited)
+├── tools/
+│   ├── __init__.py
+│   ├── search_flights.py  # Tool 1
+│   ├── search_hotels.py   # Tool 2
+│   └── calculate.py       # Tool 3
+├── data/
+│   ├── flights.json       # Mock flight data
+│   └── hotels.json        # Mock hotel data
+├── tests/
+│   └── test_tools.py      # 31 unit tests (all three tools)
+├── captured_run.txt       # Captured agent run (see below)
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Running the agent
+
+```bash
+# 1. Clone & enter the repo
+git clone <repo-url>
+cd trip-agent
+
+# 2. Install test dependencies
+pip install -r requirements.txt
+
+# 3. Set your Anthropic API key  (never commit this)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# 4. Run the agent
+python trip_agent.py
+
+# 5. Run unit tests
+python -m pytest tests/ -v
+```
+
+---
+
+## Reliability Note — Step Limit & Graceful Failure
+
+`MAX_STEPS = 10` is enforced at the top of the ReAct loop in `trip_agent.py`.
+
+```python
+while step < MAX_STEPS:
+    step += 1
+    ...
+```
+
+**What this protects against:**  
+If the model gets confused and keeps calling tools in circles — for example, repeatedly calling `calculate` with no progress toward a final answer — the loop exits after 10 iterations, sets `result.success = False`, records the `failure_reason`, and returns the partial `AgentResult` to the caller.  The caller always gets a well-structured object back, never an infinite hang.
+
+**Tool-level failures** are handled the same way.  Every tool returns `{"ok": false, "error": "..."}` rather than raising an exception.  The agent sees the error in the tool-result message and can try a different approach.  If the API itself fails (network error, quota exceeded), `run_agent` catches the `RuntimeError` and populates `result.failure_reason` — it never propagates the exception to the caller.
+
+---
+
+## Safety Note — Whitelist Arithmetic Parser
+
+**Mitigation implemented:** `tools/calculate.py` uses a hand-written recursive-descent parser instead of Python's `eval()`.
+
+**How it works:**
+
+1. A regex whitelist rejects any character that isn't a digit, decimal point, operator (`+ - * /`), or parenthesis:
+
+   ```python
+   _ALLOWED = re.compile(r"^[\d\s\+\-\*/\.\(\)]+$")
+   if not _ALLOWED.match(expr):
+       return {"ok": False, ..., "error": "disallowed characters ..."}
+   ```
+
+2. The expression is then tokenised and parsed with correct operator precedence (`*` / `/` before `+ -`) — no `eval`, no `exec`, no `compile`.
+
+3. Expression length is capped at 200 characters to prevent DoS via extremely large inputs.
+
+**What attack it defends against:**  
+If a malicious or hallucinating model passes something like `"__import__('os').system('rm -rf /')"` as the `expression` argument, the whitelist check catches the letters immediately and returns an error.  Without this guard, a naive `eval(expression)` implementation would execute arbitrary Python code with the agent process's full privileges.  This is a prompt-injection / tool-argument injection attack: the model (or upstream data that influenced the model) supplies a crafted argument to gain code execution on the host.
+
+**Input validation in all tools:**  
+`search_flights` and `search_hotels` also validate every argument before touching the data files — e.g. IATA codes are checked against a whitelist, price caps must be positive numbers, and nights must be in `[1, 30]`.  Bad arguments return an `{"ok": false, ...}` dict rather than allowing a malformed query to hit the filesystem.
+
+---
+
+## Captured Run
+
+The agent chose to call:
+
+1. `search_flights(origin="LHR", destination="OPO")` — fetches all available flights, sorted cheapest first.
+2. `search_hotels(nights=2, max_price_per_night=150)` — fetches hotels within a per-night cap that leaves room for flight + daily costs.
+3. `calculate("89 + 196 + 50 * 3")` — verifies flight (€89) + hotel (€196) + daily expenses (€50 × 3 days = €150) = €435.
+
+Final structured result (see `captured_run.txt` for full output):
+
+```json
+{
+  "flight": {
+    "airline": "Ryanair",
+    "flight_id": "FR-001",
+    "origin": "LHR",
+    "destination": "OPO",
+    "price_eur": 89
+  },
+  "hotel": {
+    "name": "Hotel Eurostars Das Artes",
+    "stars": 4,
+    "nights": 2,
+    "price_per_night_eur": 98,
+    "total_eur": 196
+  },
+  "daily_budget_eur": 50,
+  "days": 3,
+  "cost_breakdown": {
+    "flight_eur": 89,
+    "hotel_eur": 196,
+    "daily_expenses_eur": 150,
+    "total_eur": 435
+  },
+  "within_budget": true
+}
+```
+
+**€435 total — €165 under the €600 budget. ✓**
+
+The agent made 3 tool calls and finished in 3 steps (well under the 10-step limit).  The output is valid JSON that any downstream program can parse and consume.
+
+---
+
+## Grading Checklist
+
+| Requirement | Where it is |
+|---|---|
+| Three tools | `tools/search_flights.py`, `tools/search_hotels.py`, `tools/calculate.py` |
+| Multi-step goal solved by agent's own choices | `trip_agent.py` — ReAct loop, no hardwired order |
+| Structured output | JSON schema in `SYSTEM_PROMPT`; `AgentResult.itinerary` |
+| Step limit | `MAX_STEPS = 10` in `trip_agent.py` |
+| Safety mitigation | Whitelist parser in `calculate.py`; argument validation in all tools |
+| README | This file |
+| Captured run | `captured_run.txt` |
+| No API key in repo | `ANTHROPIC_API_KEY` read from environment only |
